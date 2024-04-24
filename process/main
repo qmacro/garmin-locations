@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+set -eo pipefail
+
+declare VOL="${GARMINVOL:-/Volumes/GARMIN}"
+
+main() {
+
+    test -f "$VOL/GARMIN/Locations/Lctns.fit"
+    date
+}
+
+main "$@"

@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+
+set -eo pipefail
+
+# CLIENT_ID and CLIENT_SECRET should be in .env
+set -a; test -f .env && source .env; set +a
+
+declare REDIRECT_URI="http://127.0.0.1"
+declare SCOPE="${SCOPE:-https://www.googleapis.com/auth/spreadsheets}"
+declare OAUTH_BASE_URL="https://accounts.google.com/o/oauth2"
+declare MY_NAME="${0##*/}"
+declare TOKEN_DATA_FILE="$MY_NAME.json"
+declare GRACE_MINS=5
+
+
+get_value() {
+
+    local prop=$1
+    jq --raw-output "$prop" "$TOKEN_DATA_FILE"
+
+}
+
+request_token() {
+
+    # Request token (and accompanying data), in one of two modes:
+    # - EXCHANGE: Where we don't have any token data at all, so need to start
+    #             from the beginning, with an authorisation code that we need
+    #             to exchange for token data.
+    # - REFRESH:  Where we do have token data but we want to refresh the access
+    #             token as it has expired. This requires the refresh token.
+
+    local mode=$1    # exchange or refresh
+    local value=$2   # auth code or refresh token
+
+    # Regardless of processing mode, process the resulting token data (which 
+    # will be a JSON object) by:
+    # - adding a refresh_after property*
+    # - storing the object in a file
+    # - emitting the value of the access_token property
+    #
+    # *The value of this property is the Unix epoch time of when it expires,
+    # minus a grace period to give the user a chance to actually use the token
+    # in a call.
+
+    if [[ $mode == "refresh" ]]; then
+        # Token refresh
+        curl \
+            --silent \
+            --fail \
+            --data "grant_type=refresh_token" \
+            --data-urlencode "refresh_token=$value" \
+            --data-urlencode "client_id=$CLIENT_ID" \
+            --data-urlencode "client_secret=$CLIENT_SECRET" \
+            --url "$OAUTH_BASE_URL/token"
+    else
+        # Token exchange
+        curl \
+            --silent \
+            --fail \
+            --data "grant_type=authorization_code" \
+            --data-urlencode "code=$value" \
+            --data-urlencode "client_id=$CLIENT_ID" \
+            --data-urlencode "client_secret=$CLIENT_SECRET" \
+            --data-urlencode "redirect_uri=$REDIRECT_URI" \
+            --url "$OAUTH_BASE_URL/token"
+    fi \
+    | jq --arg grace_mins "$GRACE_MINS" \
+        '. + { refresh_after: (now + .expires_in - ($grace_mins | tonumber * 60)) | floor }' \
+    | tee "$TOKEN_DATA_FILE" \
+    | jq --raw-output '.access_token'
+
+}
+
+main() {
+
+    local code now
+
+    now="$(date "+%s")"
+
+    # If we have token data, refresh if expired, otherwise just emit.
+    if [[ -s "$TOKEN_DATA_FILE" ]]; then
+
+        if [[ $now -gt $(get_value ".refresh_after") ]]; then
+            request_token "refresh" "$(get_value ".refresh_token")"
+        else
+            get_value ".access_token"
+        fi
+
+    # If we don't have token data, engage the user to get an authorisation
+    # code then exchange for token data.
+    else
+
+        echo "$OAUTH_BASE_URL/auth?client_id=$CLIENT_ID&redirect_uri=$REDIRECT_URI&scope=$SCOPE&response_type=code"
+        read -r -p 'Code received: ' code
+        test -z "$code" && exit 1
+
+        request_token "exchange" "$code"
+
+    fi
+
+}
+
+main "$@"

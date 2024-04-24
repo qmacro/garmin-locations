@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+cd "$(dirname "$0")" || exit
+
+declare location=/data
+[[ -d "$location" ]] || location=/tmp
+
+./main >> "$location/log"
