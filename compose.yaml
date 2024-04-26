@@ -1,0 +1,6 @@
+services:
+
+  waypoint-loader:
+    container_name: waypoint-loader
+    build:
+      context: .

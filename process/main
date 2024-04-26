@@ -2,12 +2,34 @@
 
 set -eo pipefail
 
-declare VOL="${GARMINVOL:-/Volumes/GARMIN}"
+set -a; test -f .env && source .env; set +a
+
+declare VOL="${GARMINVOL:-/GARMIN}"
+declare FILE="Lctns"
+declare FITFILE="$VOL/GARMIN/Location/$FILE.fit"
+declare TARGET="${1:-Sheet1!A1:C1}"
 
 main() {
 
-    test -f "$VOL/GARMIN/Locations/Lctns.fit"
-    date
+    local token
+
+    # Only proceed if (the volume is mounted and) there's
+    # a locations FIT file present.
+    test -f "$FITFILE"
+    cp "$FITFILE" .
+    #gpsbabel ...
+
+    token="$(./google-oauth)"
+
+    jq --arg range "$TARGET" -f extractwaypoints.jq "$FILE.json" \
+    | curl \
+        --silent \
+        --fail \
+        --url "https://sheets.googleapis.com/v4/spreadsheets/$SPREADSHEETID/values/$TARGET:append?valueInputOption=RAW" \
+        --header "Authorization: Bearer $token" \
+        --header 'Content-Type: application/json' \
+        --data @-
+
 }
 
 main "$@"
